@@ -83,7 +83,11 @@ impl PatternStatement {
         patterns: &HashSet<&'a PatternStatement>,
         statements: &[Statement],
     ) -> HashSet<BTreeMap<&'a PatternStatement, (usize, StatementPath)>> {
-        let statements = statements.iter().enumerate().map(|(idx, st)| ((idx, StatementPath::default()), st)).collect();
+        let statements = statements
+            .iter()
+            .enumerate()
+            .map(|(idx, st)| ((idx, StatementPath::default()), st))
+            .collect();
 
         Self::get_potential_sets_inner(patterns, &statements)
     }
@@ -114,8 +118,10 @@ impl PatternStatement {
                         }
 
                         // Get the other answers for whatever we haven't used yet
-                        let other_matches =
-                            Self::get_potential_sets_inner(&remaining_patterns, &remaining_statements);
+                        let other_matches = Self::get_potential_sets_inner(
+                            &remaining_patterns,
+                            &remaining_statements,
+                        );
 
                         for mut other in other_matches {
                             // Add in the pair we already selected
@@ -512,7 +518,15 @@ impl Statement {
     }
 }
 
-fn pathed_substs<'a>(statement: &'a Statement, path: &StatementPath) -> impl Iterator<Item = ((&'a Statement, StatementPath), Option<(&'a Statement, StatementPath)>)> {
+fn pathed_substs<'a>(
+    statement: &'a Statement,
+    path: &StatementPath,
+) -> impl Iterator<
+    Item = (
+        (&'a Statement, StatementPath),
+        Option<(&'a Statement, StatementPath)>,
+    ),
+> {
     let mut substs = statement.substatements().collect::<Vec<_>>();
 
     for ((_, p), tail) in substs.iter_mut() {
@@ -543,10 +557,12 @@ impl From<ParseNode<'_>> for Statement {
                     op,
                 }))
             }
-            ParseNode::Negation(inner) => Statement::Unary(Box::new(UnaryExpression {
-                inner: (*inner).into(),
-                op: UnaryOp::Negation,
-            })),
+            ParseNode::UnaryOperation { inner, op } => {
+                Statement::Unary(Box::new(UnaryExpression {
+                    inner: (*inner).into(),
+                    op,
+                }))
+            }
             ParseNode::Variable(v) => Statement::Variable(Variable(v.into())),
         }
     }
@@ -629,7 +645,10 @@ mod test {
 
         let expected = Substitution::parse_owned("p: a").unwrap();
 
-        let actual = pattern.try_toplevel_match(&statements[0]).as_ref().map(Substitution::to_owned);
+        let actual = pattern
+            .try_toplevel_match(&statements[0])
+            .as_ref()
+            .map(Substitution::to_owned);
 
         assert_eq!(actual, Some(expected));
     }
@@ -703,7 +722,10 @@ mod test {
                 .collect::<HashMap<_, _>>()
         });
 
-        let matched = pattern.try_toplevel_match(&statements[0]).as_ref().map(Substitution::to_owned);
+        let matched = pattern
+            .try_toplevel_match(&statements[0])
+            .as_ref()
+            .map(Substitution::to_owned);
 
         if matched != expected {
             if let Some(expected) = expected {
@@ -750,7 +772,8 @@ mod test {
         let statements = vec!["a ^ b".parse::<Statement>().unwrap()];
 
         let pattern = "p".parse::<Statement>().unwrap();
-        let matches = Substitution(once((&temp1, statements[0].clone())).collect::<HashMap<_, _>>());
+        let matches =
+            Substitution(once((&temp1, statements[0].clone())).collect::<HashMap<_, _>>());
 
         let expected = Statement::Binary(Box::new(BinaryExpression {
             lhs: Statement::Variable(Variable("a".to_string())),

@@ -10,10 +10,7 @@ use std::str::FromStr;
 /// Returns `Some(true)` if they do, `Some(false)` if they imply
 /// the inverse of the conclusion, or `None` if the solver
 /// could not determine an answer either way
-pub fn prove_validity(
-    predicates: &mut Vec<Statement>,
-    conclusion: &Statement,
-) -> Option<bool> {
+pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -> Option<bool> {
     let not = Statement::Unary(Box::new(UnaryExpression {
         inner: conclusion.clone(),
         op: UnaryOp::Negation,
@@ -66,10 +63,7 @@ impl Argument {
     }
 
     /// Returns a vec of every set of substitutions
-    fn substitutions<'a>(
-        &'a self,
-        statements: &[Statement],
-    ) -> Vec<Substitution<'a>> {
+    fn substitutions<'a>(&'a self, statements: &[Statement]) -> Vec<Substitution<'a>> {
         self.try_match(statements)
             .into_iter()
             .map(|matchup| {
@@ -86,10 +80,7 @@ impl Argument {
 
     /// Returns a set containing every possible way to match up
     /// this argument's predicates and the given statements
-    fn try_match<'a>(
-        &'a self,
-        statements: &[Statement],
-    ) -> HashSet<PatternSetMatch<'a>> {
+    fn try_match<'a>(&'a self, statements: &[Statement]) -> HashSet<PatternSetMatch<'a>> {
         let predicates = self.predicates().iter().collect();
 
         PatternStatement::try_multimatch(predicates, statements)

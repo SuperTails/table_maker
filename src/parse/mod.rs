@@ -10,7 +10,7 @@ use token::{tokenize, Token};
  *
  */
 
-// Guaranteed to not contain parenthesis/brackets
+/// Guaranteed to not contain parenthesis/brackets
 #[derive(Debug, PartialEq, Eq, Clone)]
 enum GroupedToken<'a> {
     Group(Vec<GroupedToken<'a>>),
@@ -116,7 +116,11 @@ fn parse_inner<'a>(input: &[GroupedToken<'a>], level: usize) -> Result<ParseNode
     if let Some((idx, found)) = found {
         if found == Token::Negation {
             let rhs = &input[idx + 1..];
-            Ok(ParseNode::Negation(Box::new(parse_inner(rhs, level)?)))
+            let op = UnaryOp::Negation;
+            Ok(ParseNode::UnaryOperation {
+                op,
+                inner: Box::new(parse_inner(rhs, level)?),
+            })
         } else {
             let lhs = &input[0..idx];
             let rhs = &input[idx + 1..];
@@ -179,7 +183,10 @@ impl UnaryOp {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseNode<'a> {
     Variable(&'a str),
-    Negation(Box<ParseNode<'a>>),
+    UnaryOperation {
+        inner: Box<ParseNode<'a>>,
+        op: UnaryOp,
+    },
     BinaryOperation {
         lhs: Box<ParseNode<'a>>,
         rhs: Box<ParseNode<'a>>,
@@ -191,7 +198,7 @@ impl<'a> ParseNode<'a> {
     pub fn get_variables(&self) -> BTreeSet<&'a str> {
         match self {
             ParseNode::Variable(v) => std::iter::once(*v).collect(),
-            ParseNode::Negation(n) => n.get_variables(),
+            ParseNode::UnaryOperation { inner, .. } => inner.get_variables(),
             ParseNode::BinaryOperation { lhs, rhs, .. } => {
                 let mut l = lhs.get_variables();
                 l.extend(rhs.get_variables().into_iter());
