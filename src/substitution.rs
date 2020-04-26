@@ -124,6 +124,28 @@ impl fmt::Display for Substitution<'_> {
 }
 
 #[cfg(test)]
-mod test {
-    // TODO:
+mod tests {
+    use super::*;
+    use crate::parse::BinaryOp;
+    use std::iter::once;
+
+    #[test]
+    fn substitute_single() {
+        let temp1 = Variable("p".to_string());
+
+        let statements = vec!["a ^ b".parse::<Statement>().unwrap()];
+
+        let pattern = "p".parse::<Statement>().unwrap();
+        let matches =
+            Substitution(once((&temp1, statements[0].clone())).collect::<HashMap<_, _>>());
+
+        let expected = Statement::Binary(Box::new(BinaryExpression {
+            lhs: Statement::Variable(Variable("a".to_string())),
+            rhs: Statement::Variable(Variable("b".to_string())),
+            op: BinaryOp::Conjunction,
+        }));
+
+        assert_eq!(matches.apply(&pattern), expected);
+    }
+
 }

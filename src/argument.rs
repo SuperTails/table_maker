@@ -1,9 +1,8 @@
 use crate::parse::UnaryOp;
-use crate::statement::{PatternSetMatch, PatternStatement, Statement, UnaryExpression};
-use crate::substitution::Substitution;
+use crate::statement::{PatternStatement, Statement, UnaryExpression, PatternSetMatch, all_injections, StatementPath};
 use lazy_static::lazy_static;
-use std::collections::HashSet;
 use std::str::FromStr;
+
 
 /// Determines if the given predicates imply the conclusion
 ///
@@ -40,12 +39,12 @@ pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Argument {
-    predicates: HashSet<PatternStatement>,
+    predicates: Vec<PatternStatement>,
     conclusion: Statement,
 }
 
 impl Argument {
-    pub fn predicates(&self) -> &HashSet<PatternStatement> {
+    pub fn predicates(&self) -> &[PatternStatement] {
         &self.predicates
     }
 
@@ -53,22 +52,71 @@ impl Argument {
         &self.conclusion
     }
 
+    //-- General form of this algorithm --
+    //  Let P be the set of pattern statements in this argument
+    //  Let Q be the conclusion of this argument
+    //  Let I be a set of input statements, for example: { a, (a -> b) -> c }
+    //  For every input statement J in I,
+    //      Let J' be its complement I\J
+    //      For every substatement S in J,
+    //          Let the context C be the set (S union J')
+    //          For every `PatternSetMatch` M between P and C,
+    //              Substitute between Q(M) and S to get a new result statement
+    //
+    // To substitute:
+    //  Replace S with this argument's conclusion and then `apply()` the substitution
+
+    // TODO: Maybe just rewrite this as an iterator because that's really all it is
+    pub fn algo(&self, input: &[Statement]) -> Vec<Statement> {
+        let mut result = Vec::new();
+
+        // P is `self.predicates()`
+        // Q is `self.conclusion()`
+        // I is `input`
+
+        // For every input statement J in I ...
+        for (sub_idx, j) in input.iter().enumerate() {
+            // Let J' be its complement I\J
+            let complement = input.iter().enumerate().filter_map(|(idx, i)| if i != j { Some((i.clone(), idx, StatementPath::new())) } else { None }).collect::<Vec<_>>();
+
+            // For every substatement S in J ...
+            for ((sub, sub_path), _) in j.substatements() {
+                // Let the context C be the set (S union J')
+                let mut context = complement.clone();
+                context.push((sub.clone(), sub_idx, sub_path.clone()));
+
+                for index_set in all_injections(self.predicates().len(), context.len()) {
+                    let images = index_set.into_iter().map(|idx| (context[idx].1, context[idx].2.clone())).collect::<Vec<_>>();
+
+                    if let Some(psm) = PatternSetMatch::new(input, self.predicates(), images) {
+                        let new_s = psm.substitution().apply(self.conclusion());
+
+                        let mut s = j.clone();
+                        *s.sub_path_mut(&sub_path) = new_s;
+
+                        result.push(s);
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
     /// Returns a vec of the statements that can be inferred from the input
     /// using this argument
     pub fn apply(&self, statements: &[Statement]) -> Vec<Statement> {
-        self.substitutions(statements)
-            .into_iter()
-            .map(|s| s.apply(self.conclusion()))
-            .collect::<Vec<_>>()
+        self.algo(statements)
     }
 
+    /*
     /// Returns a vec of every set of substitutions
     fn substitutions<'a>(&'a self, statements: &[Statement]) -> Vec<Substitution<'a>> {
         self.try_match(statements)
             .into_iter()
             .map(|matchup| {
                 let mut overall = Substitution::new();
-                for (p, (st_idx, st_path)) in matchup {
+                for (p, (st_idx, st_path)) in matchup.into_iter() {
                     let st = statements[st_idx].get_sub_path(&st_path);
                     let new = p.try_toplevel_match(st).unwrap();
                     overall = overall.try_merge(&new).unwrap();
@@ -77,7 +125,9 @@ impl Argument {
             })
             .collect()
     }
+    */
 
+    /*
     /// Returns a set containing every possible way to match up
     /// this argument's predicates and the given statements
     fn try_match<'a>(&'a self, statements: &[Statement]) -> HashSet<PatternSetMatch<'a>> {
@@ -85,6 +135,7 @@ impl Argument {
 
         PatternStatement::try_multimatch(predicates, statements)
     }
+    */
 }
 
 pub fn parse_writeup(s: &str) -> Result<(Vec<Statement>, Statement), String> {
@@ -121,7 +172,7 @@ impl FromStr for Argument {
                 PatternStatement::new(s)
                     .ok_or_else(|| "Failed to create pattern statement".to_string())
             })
-            .collect::<Result<HashSet<PatternStatement>, String>>()?;
+            .collect::<Result<_, String>>()?;
 
         Ok(Argument {
             predicates,
@@ -233,7 +284,7 @@ argument_list! {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

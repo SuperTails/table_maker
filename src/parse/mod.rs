@@ -33,22 +33,22 @@ fn group<'a>(input: &[Token<'a>]) -> Result<GroupedToken<'a>, String> {
     let mut paren_start = 0;
 
     for (idx, token) in input.iter().copied().enumerate() {
-        if token == Token::OpenBracket {
-            if paren_count == 0 {
-                paren_start = idx + 1;
+        match token {
+            Token::OpenBracket => {
+                if paren_count == 0 {
+                    paren_start = idx + 1;
+                }
+                paren_count += 1;
             }
-            paren_count += 1;
-        } else if token == Token::CloseBracket {
-            if paren_count == 0 {
-                return Err("Unexpected closing parenthesis".to_string());
-            } else {
+            Token::CloseBracket if paren_count == 0 => return Err(format!("Unexpected closing parenthesis at token {}", idx)),
+            Token::CloseBracket => {
                 paren_count -= 1;
                 if paren_count == 0 {
                     result.push(group(&input[paren_start..idx])?);
                 }
             }
-        } else if paren_count == 0 {
-            result.push(GroupedToken::Token(token));
+            _ if paren_count == 0 => result.push(GroupedToken::Token(token)),
+            _ => {}
         }
     }
 
@@ -209,7 +209,7 @@ impl<'a> ParseNode<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

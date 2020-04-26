@@ -49,7 +49,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

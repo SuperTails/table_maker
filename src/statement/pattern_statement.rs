@@ -1,33 +1,12 @@
-use crate::get_letter;
-use crate::parse::{full_parse, BinaryOp, ParseNode, UnaryOp};
+use super::{Statement, StatementPath, pathed_substs, UnaryExpression, BinaryExpression};
 use crate::substitution::Substitution;
-use crate::Variable;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt;
+use crate::parse::ParseNode;
+use std::collections::{HashSet, HashMap, BTreeMap};
 use std::iter::once;
-use std::ops::Deref;
 use std::str::FromStr;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct StatementPath(Vec<usize>);
-
-impl StatementPath {
-    pub fn new() -> Self {
-        StatementPath::default()
-    }
-
-    pub fn one(idx: usize) -> Self {
-        StatementPath(vec![idx])
-    }
-
-    pub fn prepend(&mut self, other: &StatementPath) {
-        let temp = std::mem::replace(&mut self.0, other.0.clone());
-        self.0.extend(temp);
-    }
-}
-
-// Note that in any of these structs, no variable may be bound twice
+use std::convert::TryFrom;
+use std::ops::Deref;
+use std::fmt;
 
 macro_rules! maybe_match {
     ($p:path = $e:expr) => {
@@ -37,12 +16,6 @@ macro_rules! maybe_match {
             None
         }
     };
-}
-
-impl fmt::Display for PatternStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Pattern: {{ {} }}", self.0)
-    }
 }
 
 /// A pattern statement can be matched on, and always has
@@ -137,6 +110,7 @@ impl PatternStatement {
         }
     }
 
+    /*
     /// Assume P is the set of pattern statements
     /// Assume S is the set of normal statements
     /// The goal of multimatch is to find all sets M containing of pattern-statement pairs,
@@ -147,33 +121,23 @@ impl PatternStatement {
     pub fn try_multimatch<'a>(
         patterns: HashSet<&'a PatternStatement>,
         statements: &[Statement],
-    ) -> HashSet<PatternSetMatch<'a>> {
+    ) -> Vec<PatternSetMatch<'a>> {
         // Each pattern must appear exactly once,
         // which means that we must have enough
         // statements to match against
         if statements.len() < patterns.len() {
-            return HashSet::new();
+            return Vec::new();
         }
 
         Self::get_potential_sets(&patterns, &statements)
             .into_iter()
-            .filter(|potential| {
-                // Determine the overall substitution for this set of matchups
-                let overall =
-                    potential
-                        .iter()
-                        .try_fold(Substitution::new(), |overall, (p1, st_path)| {
-                            let st = statements[st_path.0].get_sub_path(&st_path.1);
-
-                            let matched = p1.try_toplevel_match(st)?;
-                            overall.try_merge(&matched)
-                        });
-
-                // Only use matchup sets which result in a sensible substitution
-                overall.is_some()
-            })
+            .filter_map(|potential| {
+                let (patterns, images): (Vec<_>, Vec<_>) = potential.into_iter().map(|(p, s)| (p.clone(), s)).unzip();
+                PatternSetMatch::new(statements, &patterns, images)
+             })
             .collect()
     }
+    */
 
     /// Returns the substitution that may result if this pattern
     /// and the statement are directly compared, i.e. the whole statement is always used
@@ -278,8 +242,6 @@ impl FromStr for PatternStatement {
     }
 }
 
-pub type PatternSetMatch<'a> = BTreeMap<&'a PatternStatement, (usize, StatementPath)>;
-
 #[doc(hidden)]
 impl TryFrom<ParseNode<'_>> for PatternStatement {
     type Error = ();
@@ -297,336 +259,16 @@ impl Deref for PatternStatement {
     }
 }
 
-/// A Proposition is a Statement with no unbound variables
-pub struct Proposition {
-    bindings: HashMap<Variable, bool>,
-    statement: Statement,
-}
-
-impl Proposition {
-    pub fn new(
-        bindings: HashMap<Variable, bool>,
-        statement: Statement,
-    ) -> Result<Proposition, String> {
-        let unbound = statement.unbound_variables();
-        let newly_bound = bindings.keys().collect::<HashSet<_>>();
-
-        let missing = &unbound - &newly_bound;
-        if missing.is_empty() {
-            Ok(Proposition {
-                bindings,
-                statement,
-            })
-        } else {
-            Err(format!("Unbound variables {:?}", missing))
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Statement {
-    Universal(Box<UniversalStatement>),
-    Existential(Box<ExistentialStatement>),
-    Binary(Box<BinaryExpression>),
-    Unary(Box<UnaryExpression>),
-    Variable(Variable),
-}
-
-impl Statement {
-    pub fn get_sub_path<'a>(&'a self, path: &StatementPath) -> &'a Statement {
-        self.get_sub_path_inner(&path.0)
-    }
-
-    fn get_sub_path_inner<'a>(&'a self, path: &[usize]) -> &'a Statement {
-        if path.is_empty() {
-            self
-        } else {
-            let idx = path[0];
-            let tail = &path[1..];
-
-            let lower = match (self, idx) {
-                (Statement::Binary(b), 0) => &b.lhs,
-                (Statement::Binary(b), 1) => &b.rhs,
-                (Statement::Binary(_), i) => panic!("Invalid index {} for binary expression", i),
-                (Statement::Unary(u), 0) => &u.inner,
-                (Statement::Unary(_), i) => panic!("Invalid index {} for unary expression", i),
-                _ => todo!(),
-            };
-
-            lower.get_sub_path_inner(tail)
-        }
-    }
-
-    pub fn variables(&self) -> HashSet<&Variable> {
-        match self {
-            Statement::Universal(u) => {
-                let mut m = u.inner.variables();
-                m.insert(&u.bound);
-                m
-            }
-            Statement::Existential(u) => {
-                let mut m = u.inner.variables();
-                m.insert(&u.bound);
-                m
-            }
-            Statement::Binary(b) => b
-                .lhs
-                .variables()
-                .union(&b.rhs.variables())
-                .copied()
-                .collect(),
-            Statement::Unary(u) => u.inner.variables(),
-            Statement::Variable(v) => vec![v].into_iter().collect(),
-        }
-    }
-
-    pub fn bound_variables(&self) -> std::vec::IntoIter<&Variable> {
-        match self {
-            Statement::Universal(u) => vec![&u.bound].into_iter(),
-            Statement::Existential(e) => vec![&e.bound].into_iter(),
-            Statement::Binary(b) => b
-                .lhs
-                .bound_variables()
-                .chain(b.rhs.bound_variables())
-                .collect::<Vec<_>>()
-                .into_iter(),
-            Statement::Unary(u) => u.inner.bound_variables(),
-            Statement::Variable(_) => vec![].into_iter(),
-        }
-    }
-
-    pub fn unbound_variables(&self) -> HashSet<&Variable> {
-        let mut v = self.variables();
-        for bv in self.bound_variables() {
-            v.remove(bv);
-        }
-        v
-    }
-
-    pub fn generate_table(&self, name: &str) {
-        let variables = self.unbound_variables();
-
-        if variables.is_empty() {
-            println!(
-                "({}) <-> {}",
-                name,
-                get_letter(self.evaluate(&|_| unreachable!()))
-            );
-        } else {
-            let rows = 1 << variables.len();
-            let mut width = 0;
-            for var in variables.iter() {
-                width += 1 + var.0.len();
-                print!("|{}", var.0);
-            }
-            width += 2 + name.len();
-            println!("|{}|", name);
-            println!("{:-^w$}", "", w = width);
-
-            for row in (0..rows).rev() {
-                let get_value = |var: &str| -> bool {
-                    let idx = variables
-                        .iter()
-                        .enumerate()
-                        .find(|(_, v)| v.0 == var)
-                        .unwrap()
-                        .0;
-                    (row >> (variables.len() - 1 - idx)) & 1 != 0
-                };
-
-                for var in variables.iter() {
-                    print!("|{:^w$}", get_letter(get_value(&var.0)), w = var.0.len());
-                }
-                println!(
-                    "|{:^w$}|",
-                    get_letter(self.evaluate(&get_value)),
-                    w = name.len()
-                );
-            }
-        }
-    }
-
-    pub fn substatements(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            (&Statement, StatementPath),
-            Option<(&Statement, StatementPath)>,
-        ),
-    > {
-        once(((self, StatementPath::new()), None)).chain(self.proper_substatements())
-    }
-
-    /// This does not include the full statement itself
-    pub fn proper_substatements(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            (&Statement, StatementPath),
-            Option<(&Statement, StatementPath)>,
-        ),
-    > {
-        let result = match self {
-            Statement::Binary(b) => {
-                let BinaryExpression { lhs, rhs, .. } = &**b;
-
-                let lhs_head = (lhs, StatementPath::one(0));
-                let rhs_head = (rhs, StatementPath::one(1));
-
-                let rhs_tail = (rhs, StatementPath::one(1));
-                let lhs_tail = (lhs, StatementPath::one(0));
-
-                vec![(lhs_head, Some(rhs_tail)), (rhs_head, Some(lhs_tail))]
-            }
-            Statement::Unary(u) => {
-                let UnaryExpression { inner, .. } = &**u;
-
-                vec![((inner, StatementPath::new()), None)]
-            }
-            Statement::Existential(e) => {
-                let ExistentialStatement { inner, .. } = &**e;
-
-                vec![((inner, StatementPath::new()), None)]
-            }
-            Statement::Universal(u) => {
-                let UniversalStatement { inner, .. } = &**u;
-
-                vec![((inner, StatementPath::new()), None)]
-            }
-            Statement::Variable(_) => vec![],
-        };
-
-        result.into_iter()
-    }
-
-    pub fn evaluate<F>(&self, f: &F) -> bool
-    where
-        F: Fn(&str) -> bool,
-    {
-        match self {
-            Statement::Binary(b) => {
-                let BinaryExpression { op, lhs, rhs } = &**b;
-                op.apply(lhs.evaluate(f), rhs.evaluate(f))
-            }
-            Statement::Unary(u) => {
-                let UnaryExpression { op, inner } = &**u;
-                op.apply(inner.evaluate(f))
-            }
-            Statement::Variable(v) => f(&v.0),
-            _ => todo!(),
-        }
-    }
-}
-
-fn pathed_substs<'a>(
-    statement: &'a Statement,
-    path: &StatementPath,
-) -> impl Iterator<
-    Item = (
-        (&'a Statement, StatementPath),
-        Option<(&'a Statement, StatementPath)>,
-    ),
-> {
-    let mut substs = statement.substatements().collect::<Vec<_>>();
-
-    for ((_, p), tail) in substs.iter_mut() {
-        p.prepend(path);
-        if let Some((_, p)) = tail {
-            p.prepend(path);
-        }
-    }
-
-    substs.into_iter()
-}
-
-impl FromStr for Statement {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Statement::from(full_parse(s)?))
-    }
-}
-
-#[doc(hidden)]
-impl From<ParseNode<'_>> for Statement {
-    fn from(node: ParseNode<'_>) -> Statement {
-        match node {
-            ParseNode::BinaryOperation { lhs, rhs, op } => {
-                Statement::Binary(Box::new(BinaryExpression {
-                    lhs: (*lhs).into(),
-                    rhs: (*rhs).into(),
-                    op,
-                }))
-            }
-            ParseNode::UnaryOperation { inner, op } => {
-                Statement::Unary(Box::new(UnaryExpression {
-                    inner: (*inner).into(),
-                    op,
-                }))
-            }
-            ParseNode::Variable(v) => Statement::Variable(Variable(v.into())),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UniversalStatement {
-    pub bound: Variable,
-    pub inner: Statement,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ExistentialStatement {
-    pub bound: Variable,
-    pub inner: Statement,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BinaryExpression {
-    pub lhs: Statement,
-    pub rhs: Statement,
-    pub op: BinaryOp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UnaryExpression {
-    pub inner: Statement,
-    pub op: UnaryOp,
-}
-
-impl fmt::Display for BinaryExpression {
+impl fmt::Display for PatternStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.op {
-            BinaryOp::Conjunction => write!(f, "({} ^ {})", self.lhs, self.rhs),
-            BinaryOp::Disjunction => write!(f, "({} V {})", self.lhs, self.rhs),
-            BinaryOp::Equivalence => write!(f, "({} == {})", self.lhs, self.rhs),
-            BinaryOp::Implication => write!(f, "({} -> {})", self.lhs, self.rhs),
-        }
-    }
-}
-
-impl fmt::Display for UnaryExpression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.op {
-            UnaryOp::Negation => write!(f, "!{}", self.inner),
-        }
-    }
-}
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Statement::Binary(b) => write!(f, "{}", b),
-            Statement::Unary(u) => write!(f, "{}", u),
-            // TODO: Display properly
-            Statement::Variable(v) => write!(f, "{}", v.0),
-            _ => todo!(),
-        }
+        write!(f, "Pattern: {{ {} }}", self.0)
     }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use crate::Variable;
 
     #[test]
     fn conflicting_match() {
@@ -763,24 +405,5 @@ mod test {
     #[test]
     fn match_conflict_test() {
         match_test("p -> p", "a -> b", None)
-    }
-
-    #[test]
-    fn substitute_single() {
-        let temp1 = Variable("p".to_string());
-
-        let statements = vec!["a ^ b".parse::<Statement>().unwrap()];
-
-        let pattern = "p".parse::<Statement>().unwrap();
-        let matches =
-            Substitution(once((&temp1, statements[0].clone())).collect::<HashMap<_, _>>());
-
-        let expected = Statement::Binary(Box::new(BinaryExpression {
-            lhs: Statement::Variable(Variable("a".to_string())),
-            rhs: Statement::Variable(Variable("b".to_string())),
-            op: BinaryOp::Conjunction,
-        }));
-
-        assert_eq!(matches.apply(&pattern), expected);
     }
 }
