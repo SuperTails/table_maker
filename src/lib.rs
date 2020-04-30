@@ -17,7 +17,7 @@ pub fn get_letter(value: bool) -> char {
 
 /// Convenience function to parse and prove an arugment
 pub fn prove(s: &str) -> Result<Option<bool>, String> {
-    let (mut p, c) = argument::parse_writeup(s)?;
+    let (mut p, c) = argument::parse_prolog(s)?;
     let result = argument::prove_validity(&mut p, &c);
     println!("---");
     for r in p.iter() {
@@ -76,33 +76,19 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore]
     fn two_rules() {
         assert_eq!(
             Ok(Some(true)),
-            prove(
-                r#"
-            a -> b
-            a ^ b
-            ---
-            b
-        "#
-            )
+            prove("b :- a -> b, a ^ b")
         );
     }
 
     #[test]
-    #[ignore]
     fn nested_rule() {
+        println!("Running");
         assert_eq!(
             Ok(Some(true)),
-            prove(
-                r#"
-            [a ^ !b] -> c
-            ---
-            c -> a
-        "#
-            )
+            prove("a -> c :- [a ^ !b] -> c"),
         );
     }
 }

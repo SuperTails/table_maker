@@ -198,9 +198,6 @@ impl PatternStatement {
                         .unwrap()
                         .try_toplevel_match(r2)?;
 
-                    println!("Left matches: {}", left_matches);
-                    println!("Right matches: {}", right_matches);
-
                     matches = matches.try_merge(&left_matches)?;
                     matches = matches.try_merge(&right_matches)?;
                 } else {

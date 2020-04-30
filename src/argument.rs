@@ -3,7 +3,6 @@ use crate::statement::{PatternStatement, Statement, UnaryExpression, PatternSetM
 use lazy_static::lazy_static;
 use std::str::FromStr;
 
-
 /// Determines if the given predicates imply the conclusion
 ///
 /// Returns `Some(true)` if they do, `Some(false)` if they imply
@@ -16,7 +15,7 @@ pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -
     }));
 
     let mut last_len = None;
-
+    
     while last_len != Some(predicates.len()) {
         last_len = Some(predicates.len());
 
@@ -108,34 +107,32 @@ impl Argument {
     pub fn apply(&self, statements: &[Statement]) -> Vec<Statement> {
         self.algo(statements)
     }
+}
 
-    /*
-    /// Returns a vec of every set of substitutions
-    fn substitutions<'a>(&'a self, statements: &[Statement]) -> Vec<Substitution<'a>> {
-        self.try_match(statements)
-            .into_iter()
-            .map(|matchup| {
-                let mut overall = Substitution::new();
-                for (p, (st_idx, st_path)) in matchup.into_iter() {
-                    let st = statements[st_idx].get_sub_path(&st_path);
-                    let new = p.try_toplevel_match(st).unwrap();
-                    overall = overall.try_merge(&new).unwrap();
-                }
-                overall
-            })
-            .collect()
-    }
-    */
+pub fn parse_prolog(s: &str) -> Result<(Vec<Statement>, Statement), String> {
+    let (head, body) = {
+        let mut n = s.trim().split(":-");
+        let head = n
+            .next()
+            .ok_or_else(|| "Could not find head".to_string())?;
+        let body = n
+            .next()
+            .ok_or_else(|| "Could not find body".to_string())?;
 
-    /*
-    /// Returns a set containing every possible way to match up
-    /// this argument's predicates and the given statements
-    fn try_match<'a>(&'a self, statements: &[Statement]) -> HashSet<PatternSetMatch<'a>> {
-        let predicates = self.predicates().iter().collect();
+        if n.next() != None {
+            return Err("Too many instances of ':-' in string".to_string());
+        }
+        (head, body)
+    };
 
-        PatternStatement::try_multimatch(predicates, statements)
-    }
-    */
+    // TODO: This will go very badly if I ever allow commas in statements
+    let head = head.parse::<Statement>()?;
+    let body = body
+        .split(',')
+        .map(|s| s.parse::<Statement>())
+        .collect::<Result<Vec<Statement>, String>>()?;
+
+    Ok((body, head))
 }
 
 pub fn parse_writeup(s: &str) -> Result<(Vec<Statement>, Statement), String> {
@@ -147,7 +144,10 @@ pub fn parse_writeup(s: &str) -> Result<(Vec<Statement>, Statement), String> {
         let c = n
             .next()
             .ok_or_else(|| "Could not find conclusion".to_string())?;
-        assert_eq!(n.next(), None);
+
+        if n.next() != None {
+            return Err("Too many instances of '---' in string".to_string());
+        }
         (p, c)
     };
 
