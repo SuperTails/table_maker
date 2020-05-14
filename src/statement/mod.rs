@@ -8,11 +8,9 @@ use std::str::FromStr;
 use lazy_static::lazy_static;
 
 mod pattern_statement;
-mod proposition;
 mod pattern_match;
 
 pub use pattern_statement::*;
-pub use proposition::*;
 pub use pattern_match::*;
 
 
@@ -231,7 +229,7 @@ impl Statement {
     }
 }
 
-fn pathed_substs<'a>(
+pub fn pathed_substs<'a>(
     statement: &'a Statement,
     path: &StatementPath,
 ) -> impl Iterator<

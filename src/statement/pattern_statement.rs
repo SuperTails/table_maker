@@ -52,7 +52,7 @@ impl PatternStatement {
     /// Returns the set of *every* possible group of pattern-statement pairs
     /// Each 'statement' in the return value is represented by its index in the argument,
     /// and then path in that statement
-    fn get_potential_sets<'a>(
+    pub fn get_potential_sets<'a>(
         patterns: &HashSet<&'a PatternStatement>,
         statements: &[Statement],
     ) -> HashSet<BTreeMap<&'a PatternStatement, (usize, StatementPath)>> {
@@ -65,7 +65,7 @@ impl PatternStatement {
         Self::get_potential_sets_inner(patterns, &statements)
     }
 
-    fn get_potential_sets_inner<'a>(
+    pub fn get_potential_sets_inner<'a>(
         patterns: &HashSet<&'a PatternStatement>,
         statements: &HashMap<(usize, StatementPath), &Statement>,
     ) -> HashSet<BTreeMap<&'a PatternStatement, (usize, StatementPath)>> {

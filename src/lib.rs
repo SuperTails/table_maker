@@ -1,6 +1,3 @@
-// TODO: Remove
-#![allow(dead_code)]
-
 pub mod argument;
 mod parse;
 pub mod statement;
