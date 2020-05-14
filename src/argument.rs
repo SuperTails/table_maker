@@ -1,5 +1,4 @@
-use crate::parse::UnaryOp;
-use crate::statement::{PatternStatement, Statement, UnaryExpression, PatternSetMatch, all_injections, StatementPath};
+use crate::statement::{PatternStatement, Statement, FuncApplication, PatternSetMatch, all_injections, StatementPath, NEGATION};
 use lazy_static::lazy_static;
 use std::str::FromStr;
 
@@ -9,10 +8,10 @@ use std::str::FromStr;
 /// the inverse of the conclusion, or `None` if the solver
 /// could not determine an answer either way
 pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -> Option<bool> {
-    let not = Statement::Unary(Box::new(UnaryExpression {
-        inner: conclusion.clone(),
-        op: UnaryOp::Negation,
-    }));
+    let not = Statement::FuncApplication(FuncApplication::unary(
+        conclusion.clone(),
+        &*NEGATION,
+    ));
 
     let mut last_len = None;
     
@@ -21,7 +20,11 @@ pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -
 
         for (argument, _name) in ARGUMENTS.iter() {
             let new = argument.apply(&predicates);
-            predicates.extend(new);
+            for n in new {
+                if !predicates.contains(&n) {
+                    predicates.push(n);
+                }
+            }
         }
 
         if predicates.contains(&conclusion) {
@@ -31,12 +34,13 @@ pub fn prove_validity(predicates: &mut Vec<Statement>, conclusion: &Statement) -
         if predicates.contains(&not) {
             return Some(false);
         }
+
     }
 
     None
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Argument {
     predicates: Vec<PatternStatement>,
     conclusion: Statement,
@@ -93,7 +97,9 @@ impl Argument {
                         let mut s = j.clone();
                         *s.sub_path_mut(&sub_path) = new_s;
 
-                        result.push(s);
+                        if !result.contains(&s) {
+                            result.push(s);
+                        }
                     }
                 }
             }

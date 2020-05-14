@@ -1,11 +1,11 @@
-use crate::statement::{BinaryExpression, Statement, UnaryExpression};
+use crate::statement::{Statement, FuncApplication};
 use crate::Variable;
 use std::collections::{hash_map, HashMap, HashSet};
 use std::fmt;
 
 pub type SubstitutionIter<'c, 'a> = hash_map::Iter<'c, &'a Variable, Statement>;
 
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct Substitution<'a>(pub HashMap<&'a Variable, Statement>);
 
 impl<'a> Substitution<'a> {
@@ -24,15 +24,10 @@ impl<'a> Substitution<'a> {
 
         match statement {
             Statement::Variable(v) => self.0.get(v).unwrap_or(statement).clone(),
-            Statement::Binary(b) => Statement::Binary(Box::new(BinaryExpression {
-                lhs: self.apply(&b.lhs),
-                rhs: self.apply(&b.rhs),
-                op: b.op,
-            })),
-            Statement::Unary(u) => Statement::Unary(Box::new(UnaryExpression {
-                inner: self.apply(&u.inner),
-                op: u.op,
-            })),
+            Statement::FuncApplication(app) => Statement::FuncApplication(FuncApplication::new(
+                app.args().iter().map(|arg| self.apply(arg)).collect(),
+                app.function()
+            )),
             _ => todo!(),
         }
     }
@@ -126,8 +121,8 @@ impl fmt::Display for Substitution<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::BinaryOp;
     use std::iter::once;
+    use crate::statement::CONJUNCTION;
 
     #[test]
     fn substitute_single() {
@@ -139,11 +134,11 @@ mod tests {
         let matches =
             Substitution(once((&temp1, statements[0].clone())).collect::<HashMap<_, _>>());
 
-        let expected = Statement::Binary(Box::new(BinaryExpression {
-            lhs: Statement::Variable(Variable("a".to_string())),
-            rhs: Statement::Variable(Variable("b".to_string())),
-            op: BinaryOp::Conjunction,
-        }));
+        let expected = Statement::FuncApplication(FuncApplication::binary(
+            Statement::Variable(Variable("a".to_string())),
+            Statement::Variable(Variable("b".to_string())),
+            &*CONJUNCTION,
+        ));
 
         assert_eq!(matches.apply(&pattern), expected);
     }

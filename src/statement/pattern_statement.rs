@@ -1,4 +1,4 @@
-use super::{Statement, StatementPath, pathed_substs, UnaryExpression, BinaryExpression};
+use super::{Statement, StatementPath, pathed_substs};
 use crate::substitution::Substitution;
 use crate::parse::ParseNode;
 use std::collections::{HashSet, HashMap, BTreeMap};
@@ -20,7 +20,7 @@ macro_rules! maybe_match {
 
 /// A pattern statement can be matched on, and always has
 /// at least one unbound variable
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct PatternStatement(Statement);
 
@@ -86,7 +86,7 @@ impl PatternStatement {
                         let mut remaining_statements = statements.clone();
                         remaining_statements.remove(full_path).unwrap();
 
-                        if let Some((tail_st, tail_path)) = tail {
+                        for (tail_st, tail_path) in tail {
                             remaining_statements.insert((full_path.0, tail_path), tail_st);
                         }
 
@@ -176,48 +176,18 @@ impl PatternStatement {
                 // A variable will match anything
                 matches.try_insert(v, statement.clone())?;
             }
-            Statement::Binary(b1) => {
-                let b2 = maybe_match!(Statement::Binary = statement)?;
+            Statement::FuncApplication(b1) => {
+                let b2 = maybe_match!(Statement::FuncApplication = statement)?;
 
-                let BinaryExpression {
-                    lhs: l1,
-                    rhs: r1,
-                    op: op1,
-                } = &**b1;
-                let BinaryExpression {
-                    lhs: l2,
-                    rhs: r2,
-                    op: op2,
-                } = &**b2;
+                if b1.function() == b2.function() {
+                    // TODO: Convert to a `try_fold`
+                    for (pat, arg) in b1.args().iter().zip(b2.args().iter()) {
+                        let m = PatternStatement::new_ref(pat)
+                            .unwrap()
+                            .try_toplevel_match(arg)?;
 
-                if op1 == op2 {
-                    let left_matches = PatternStatement::new_ref(l1)
-                        .unwrap()
-                        .try_toplevel_match(l2)?;
-                    let right_matches = PatternStatement::new_ref(r1)
-                        .unwrap()
-                        .try_toplevel_match(r2)?;
-
-                    matches = matches.try_merge(&left_matches)?;
-                    matches = matches.try_merge(&right_matches)?;
-                } else {
-                    // TODO: Is this the correct behavior?
-                    return None;
-                }
-            }
-            Statement::Unary(u1) => {
-                let u2 = maybe_match!(Statement::Unary = statement)?;
-                let UnaryExpression { inner: i1, op: op1 } = &**u1;
-                let UnaryExpression {
-                    inner: inner_statement,
-                    op: op2,
-                } = &**u2;
-
-                if op1 == op2 {
-                    let inner_pattern = PatternStatement::new_ref(i1).unwrap();
-                    let new_matches = inner_pattern.try_toplevel_match(inner_statement)?;
-
-                    matches = matches.try_merge(&new_matches)?;
+                        matches = matches.try_merge(&m)?;
+                    }
                 } else {
                     // TODO: Is this the correct behavior?
                     return None;

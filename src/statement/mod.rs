@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::iter::once;
 use std::str::FromStr;
+use lazy_static::lazy_static;
 
 mod pattern_statement;
 mod proposition;
@@ -33,12 +34,10 @@ impl StatementPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Statement {
-    Universal(Box<UniversalStatement>),
-    Existential(Box<ExistentialStatement>),
-    Binary(Box<BinaryExpression>),
-    Unary(Box<UnaryExpression>),
+    Quantification(Box<QuantiStatement>),
+    FuncApplication(FuncApplication),
     Variable(Variable),
 }
 
@@ -55,11 +54,7 @@ impl Statement {
             let tail = &path[1..];
 
             let lower = match (self, idx) {
-                (Statement::Binary(b), 0) => &b.lhs,
-                (Statement::Binary(b), 1) => &b.rhs,
-                (Statement::Binary(_), i) => panic!("Invalid index {} for binary expression", i),
-                (Statement::Unary(u), 0) => &u.inner,
-                (Statement::Unary(_), i) => panic!("Invalid index {} for unary expression", i),
+                (Statement::FuncApplication(b), idx) => &b.args()[idx],
                 _ => todo!(),
             };
 
@@ -78,11 +73,7 @@ impl Statement {
             let idx = path[0];
 
             let lower = match (self, idx) {
-                (Statement::Binary(b), 0) => &mut b.lhs,
-                (Statement::Binary(b), 1) => &mut b.rhs,
-                (Statement::Binary(_), i) => panic!("Invalid index {} for binary expression", i),
-                (Statement::Unary(u), 0) => &mut u.inner,
-                (Statement::Unary(_), i) => panic!("Invalid index {} for unary expression", i),
+                (Statement::FuncApplication(b), idx) => &mut b.args_mut()[idx],
                 _ => todo!(),
             };
 
@@ -93,38 +84,28 @@ impl Statement {
 
     pub fn variables(&self) -> HashSet<&Variable> {
         match self {
-            Statement::Universal(u) => {
+            Statement::Quantification(u) => {
                 let mut m = u.inner.variables();
                 m.insert(&u.bound);
                 m
             }
-            Statement::Existential(u) => {
-                let mut m = u.inner.variables();
-                m.insert(&u.bound);
-                m
+            Statement::FuncApplication(b) => {
+                let mut variables = HashSet::new();
+                for arg in b.args() {
+                    variables.extend(arg.variables().iter().copied());
+                }
+                variables
             }
-            Statement::Binary(b) => b
-                .lhs
-                .variables()
-                .union(&b.rhs.variables())
-                .copied()
-                .collect(),
-            Statement::Unary(u) => u.inner.variables(),
             Statement::Variable(v) => vec![v].into_iter().collect(),
         }
     }
 
     pub fn bound_variables(&self) -> std::vec::IntoIter<&Variable> {
         match self {
-            Statement::Universal(u) => vec![&u.bound].into_iter(),
-            Statement::Existential(e) => vec![&e.bound].into_iter(),
-            Statement::Binary(b) => b
-                .lhs
-                .bound_variables()
-                .chain(b.rhs.bound_variables())
-                .collect::<Vec<_>>()
-                .into_iter(),
-            Statement::Unary(u) => u.inner.bound_variables(),
+            Statement::Quantification(u) => vec![&u.bound].into_iter(),
+            Statement::FuncApplication(b) => {
+                b.args().iter().flat_map(|b| b.bound_variables()).collect::<Vec<_>>().into_iter()
+            }
             Statement::Variable(_) => vec![].into_iter(),
         }
     }
@@ -144,7 +125,7 @@ impl Statement {
             println!(
                 "({}) <-> {}",
                 name,
-                get_letter(self.evaluate(&|_| unreachable!()))
+                get_letter(self.evaluate(&|_| unreachable!()).unwrap())
             );
         } else {
             let rows = 1 << variables.len();
@@ -173,7 +154,7 @@ impl Statement {
                 }
                 println!(
                     "|{:^w$}|",
-                    get_letter(self.evaluate(&get_value)),
+                    get_letter(self.evaluate(&get_value).unwrap()),
                     w = name.len()
                 );
             }
@@ -185,10 +166,10 @@ impl Statement {
     ) -> impl Iterator<
         Item = (
             (&Statement, StatementPath),
-            Option<(&Statement, StatementPath)>,
+            Vec<(&Statement, StatementPath)>,
         ),
     > {
-        once(((self, StatementPath::new()), None)).chain(self.proper_substatements())
+        once(((self, StatementPath::new()), Vec::new())).chain(self.proper_substatements())
     }
 
     /// This does not include the full statement itself
@@ -197,35 +178,31 @@ impl Statement {
     ) -> impl Iterator<
         Item = (
             (&Statement, StatementPath),
-            Option<(&Statement, StatementPath)>,
+            Vec<(&Statement, StatementPath)>,
         ),
     > {
         let result = match self {
-            Statement::Binary(b) => {
-                let BinaryExpression { lhs, rhs, .. } = &**b;
+            Statement::FuncApplication(f) => {
+                f.args
+                    .iter()
+                    .enumerate()
+                    .map(|(arg_idx, arg)| {
+                        let current = (arg, StatementPath::one(arg_idx));
+                        let others = f.args
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i != arg_idx)
+                            .map(|(i, a)| (a, StatementPath::one(i)))
+                            .collect();
 
-                let lhs_head = (lhs, StatementPath::one(0));
-                let rhs_head = (rhs, StatementPath::one(1));
-
-                let rhs_tail = (rhs, StatementPath::one(1));
-                let lhs_tail = (lhs, StatementPath::one(0));
-
-                vec![(lhs_head, Some(rhs_tail)), (rhs_head, Some(lhs_tail))]
+                        (current, others)
+                    })
+                    .collect()
             }
-            Statement::Unary(u) => {
-                let UnaryExpression { inner, .. } = &**u;
+            Statement::Quantification(e) => {
+                let QuantiStatement { inner, .. } = &**e;
 
-                vec![((inner, StatementPath::new()), None)]
-            }
-            Statement::Existential(e) => {
-                let ExistentialStatement { inner, .. } = &**e;
-
-                vec![((inner, StatementPath::new()), None)]
-            }
-            Statement::Universal(u) => {
-                let UniversalStatement { inner, .. } = &**u;
-
-                vec![((inner, StatementPath::new()), None)]
+                vec![((inner, StatementPath::new()), Vec::new())]
             }
             Statement::Variable(_) => vec![],
         };
@@ -233,20 +210,22 @@ impl Statement {
         result.into_iter()
     }
 
-    pub fn evaluate<F>(&self, f: &F) -> bool
+    pub fn evaluate<F>(&self, f: &F) -> Option<bool>
     where
         F: Fn(&str) -> bool,
     {
         match self {
-            Statement::Binary(b) => {
-                let BinaryExpression { op, lhs, rhs } = &**b;
-                op.apply(lhs.evaluate(f), rhs.evaluate(f))
+            Statement::FuncApplication(app) => {
+                let eval = app.function().evaluator()?;
+                let args = app
+                    .args()
+                    .iter()
+                    .map(|arg| arg.evaluate(f))
+                    .collect::<Option<Vec<bool>>>()?;
+
+                Some((eval)(&args))
             }
-            Statement::Unary(u) => {
-                let UnaryExpression { op, inner } = &**u;
-                op.apply(inner.evaluate(f))
-            }
-            Statement::Variable(v) => f(&v.0),
+            Statement::Variable(v) => Some(f(&v.0)),
             _ => todo!(),
         }
     }
@@ -258,14 +237,14 @@ fn pathed_substs<'a>(
 ) -> impl Iterator<
     Item = (
         (&'a Statement, StatementPath),
-        Option<(&'a Statement, StatementPath)>,
+        Vec<(&'a Statement, StatementPath)>,
     ),
 > {
     let mut substs = statement.substatements().collect::<Vec<_>>();
 
     for ((_, p), tail) in substs.iter_mut() {
         p.prepend(path);
-        if let Some((_, p)) = tail {
+        for (_, p) in tail {
             p.prepend(path);
         }
     }
@@ -285,16 +264,26 @@ impl From<ParseNode<'_>> for Statement {
     fn from(node: ParseNode<'_>) -> Statement {
         match node {
             ParseNode::BinaryOperation { lhs, rhs, op } => {
-                Statement::Binary(Box::new(BinaryExpression {
-                    lhs: (*lhs).into(),
-                    rhs: (*rhs).into(),
-                    op,
-                }))
+                let def = match op {
+                    BinaryOp::Conjunction => &*CONJUNCTION,
+                    BinaryOp::Disjunction => &*DISJUNCTION,
+                    BinaryOp::Equivalence => &*EQUIVALENCE,
+                    BinaryOp::Implication => &*IMPLICATION,
+                };
+                Statement::FuncApplication(FuncApplication::binary((*lhs).into(), (*rhs).into(), def))
             }
             ParseNode::UnaryOperation { inner, op } => {
-                Statement::Unary(Box::new(UnaryExpression {
+                let def = match op {
+                    UnaryOp::Negation => &*NEGATION,
+                };
+                Statement::FuncApplication(FuncApplication::unary((*inner).into(), def))
+            }
+            ParseNode::Quantification { universal, bound, inner } => {
+                let bound = Variable(bound.into());
+                Statement::Quantification(Box::new(QuantiStatement {
+                    bound,
                     inner: (*inner).into(),
-                    op,
+                    universal,
                 }))
             }
             ParseNode::Variable(v) => Statement::Variable(Variable(v.into())),
@@ -305,8 +294,7 @@ impl From<ParseNode<'_>> for Statement {
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Statement::Binary(b) => write!(f, "{}", b),
-            Statement::Unary(u) => write!(f, "{}", u),
+            Statement::FuncApplication(a) => write!(f, "{:?}", a),
             // TODO: Display properly
             Statement::Variable(v) => write!(f, "{}", v.0),
             _ => todo!(),
@@ -314,47 +302,153 @@ impl fmt::Display for Statement {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UniversalStatement {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QuantiStatement {
     pub bound: Variable,
     pub inner: Statement,
+    pub universal: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ExistentialStatement {
-    pub bound: Variable,
-    pub inner: Statement,
+pub struct FuncDefinition {
+    arity: usize,
+    evaluator: Option<Box<dyn Fn(&[bool]) -> bool + Sync>>,
+    expander: Option<Box<dyn Fn(&[Statement]) -> Statement + Sync>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BinaryExpression {
-    pub lhs: Statement,
-    pub rhs: Statement,
-    pub op: BinaryOp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct UnaryExpression {
-    pub inner: Statement,
-    pub op: UnaryOp,
-}
-
-impl fmt::Display for BinaryExpression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.op {
-            BinaryOp::Conjunction => write!(f, "({} ^ {})", self.lhs, self.rhs),
-            BinaryOp::Disjunction => write!(f, "({} V {})", self.lhs, self.rhs),
-            BinaryOp::Equivalence => write!(f, "({} == {})", self.lhs, self.rhs),
-            BinaryOp::Implication => write!(f, "({} -> {})", self.lhs, self.rhs),
-        }
+impl FuncDefinition {
+    fn as_ptr_tuple(&self) -> (usize, Option<usize>, Option<usize>) {
+        (
+            self.arity,
+            self.evaluator.as_deref().map(|e| &*e as *const _ as *const () as usize),
+            self.expander.as_deref().map(|e| &*e as *const _ as *const () as usize),
+        )
     }
 }
 
-impl fmt::Display for UnaryExpression {
+impl PartialEq for FuncDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ptr_tuple() == other.as_ptr_tuple()
+    }
+}
+
+impl Eq for FuncDefinition {}
+
+impl PartialOrd for FuncDefinition {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.as_ptr_tuple().partial_cmp(&other.as_ptr_tuple())
+    }
+}
+
+impl Ord for FuncDefinition {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_ptr_tuple().cmp(&other.as_ptr_tuple())
+    }
+}
+
+impl std::hash::Hash for FuncDefinition {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: std::hash::Hasher
+    {
+        self.as_ptr_tuple().hash(state)
+    }
+}
+
+impl fmt::Debug for FuncDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.op {
-            UnaryOp::Negation => write!(f, "!{}", self.inner),
+        write!(
+            f,
+            "FuncDefinition {{ arity: {}, evaluator: {}, expander: {} }}",
+            self.arity,
+            if self.evaluator.is_some() { "Some" } else { "None" },
+            if self.expander.is_some() { "Some" } else { "None" },
+        )
+    }
+}
+
+impl FuncDefinition {
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    pub fn evaluator(&self) -> Option<&(dyn Fn(&[bool]) -> bool + Sync)> {
+        self.evaluator.as_deref()
+    }
+
+    pub fn expander(&self) -> Option<&(dyn Fn(&[Statement]) -> Statement + Sync)> {
+        self.expander.as_deref()
+    }
+}
+
+// TODO: These can probably all be represented in terms of
+// negation and either conjunction or disjunction
+// This also means an expander could be made for some of them
+lazy_static! {
+    pub static ref NEGATION: FuncDefinition = FuncDefinition {
+        arity: 1,
+        evaluator: Some(Box::new(|args| { assert_eq!(args.len(), 1); !args[0] })),
+        expander: None,
+    };
+
+    pub static ref CONJUNCTION: FuncDefinition = FuncDefinition {
+        arity: 2,
+        evaluator: Some(Box::new(|args| { assert_eq!(args.len(), 2); args[0] && args[1] })),
+        expander: None,
+    };
+
+    pub static ref DISJUNCTION: FuncDefinition = FuncDefinition {
+        arity: 2,
+        evaluator: Some(Box::new(|args| { assert_eq!(args.len(), 2); args[0] || args[1] })),
+        expander: None,
+    };
+
+    pub static ref IMPLICATION: FuncDefinition = FuncDefinition {
+        arity: 2,
+        evaluator: Some(Box::new(|args| { assert_eq!(args.len(), 2); !args[0] || args[1] })),
+        expander: None,
+    };
+
+    pub static ref EQUIVALENCE: FuncDefinition = FuncDefinition {
+        arity: 2,
+        evaluator: Some(Box::new(|args| { assert_eq!(args.len(), 2); args[0] == args[1] })),
+        expander: None,
+    };
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FuncApplication {
+    args: Vec<Statement>,
+    function: &'static FuncDefinition,
+}
+
+impl FuncApplication {
+    pub fn new(args: Vec<Statement>, function: &'static FuncDefinition) -> Self {
+        assert_eq!(args.len(), function.arity());
+
+        FuncApplication {
+            function,
+            args,
         }
+    }
+
+    pub fn unary(arg: Statement, function: &'static FuncDefinition) -> Self {
+        FuncApplication::new(vec![arg], function)
+    }
+
+    pub fn binary(lhs: Statement, rhs: Statement, function: &'static FuncDefinition) -> Self {
+        FuncApplication::new(vec![lhs, rhs], function)
+    }
+
+    pub fn args(&self) -> &[Statement] {
+        &self.args
+    }
+
+    pub fn args_mut(&mut self) -> &mut [Statement] {
+        &mut self.args
+    }
+
+    pub fn function(&self) -> &'static FuncDefinition {
+        &self.function
     }
 }
 

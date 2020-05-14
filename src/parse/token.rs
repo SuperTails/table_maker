@@ -8,6 +8,8 @@ pub enum Token<'a> {
     CloseBracket,
     RightArrow,
     DoubleArrow,
+    ForAll,
+    Exists,
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
@@ -19,6 +21,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
         let follow2 = input.chars().nth(idx + 2);
 
         let next = match c {
+            '∀' => Some(Token::ForAll),
+            '∃' => Some(Token::Exists),
             '^' => Some(Token::Conjunction),
             'V' | 'v' => Some(Token::Disjunction),
             '!' | '~' => Some(Token::Negation),

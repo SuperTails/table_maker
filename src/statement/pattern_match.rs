@@ -7,7 +7,7 @@ use std::collections::HashSet;
 /// a set *C* (also called the *context*) of normal statements,
 /// in which every element (p, c) satisfies: p matches c,
 /// and which can be collected into a substitution (TODO: define that formally)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PatternSetMatch<'a> {
     // This field might not actually be necessary
     statements: &'a [Statement],

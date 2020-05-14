@@ -73,8 +73,21 @@ fn parse<'a>(input: &[Token<'a>]) -> Result<ParseNode<'a>, String> {
  */
 fn parse_inner<'a>(input: &[GroupedToken<'a>], level: usize) -> Result<ParseNode<'a>, String> {
     if level == 4 {
+        // TODO: Merge the two quantification if statements in the middle
         return if input.is_empty() {
             Err("Empty input".to_string())
+        } else if let [GroupedToken::Token(Token::Exists), GroupedToken::Token(Token::Variable(bound)), GroupedToken::Group(inner)] = input {
+            Ok(ParseNode::Quantification {
+                universal: false,
+                bound,
+                inner: Box::new(parse_inner(&inner, 0)?),
+            })
+        } else if let [GroupedToken::Token(Token::ForAll), GroupedToken::Token(Token::Variable(bound)), GroupedToken::Group(inner)] = input {
+            Ok(ParseNode::Quantification {
+                universal: true,
+                bound,
+                inner: Box::new(parse_inner(&inner, 0)?),
+            })
         } else if input.len() != 1 {
             Err("More than one consecutive identifier/group".to_string())
         } else {
@@ -192,6 +205,11 @@ pub enum ParseNode<'a> {
         rhs: Box<ParseNode<'a>>,
         op: BinaryOp,
     },
+    Quantification {
+        universal: bool,
+        bound: &'a str,
+        inner: Box<ParseNode<'a>>,
+    }
 }
 
 impl<'a> ParseNode<'a> {
@@ -204,6 +222,8 @@ impl<'a> ParseNode<'a> {
                 l.extend(rhs.get_variables().into_iter());
                 l
             }
+            // TODO: Should this be included?
+            ParseNode::Quantification { inner, .. } => inner.get_variables(),
         }
     }
 }
@@ -215,5 +235,17 @@ mod tests {
     #[test]
     fn basic_parse() {
         assert_eq!(full_parse("a"), Ok(ParseNode::Variable("a")));
+    }
+
+    #[test]
+    fn quantification() {
+        assert_eq!(
+            full_parse("∃a[b]"),
+            Ok(ParseNode::Quantification {
+                universal: false,
+                bound: "a",
+                inner: Box::new(ParseNode::Variable("b")),
+            })
+        );
     }
 }
